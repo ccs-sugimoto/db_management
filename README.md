@@ -28,7 +28,6 @@ PostgreSQLデータベースへの接続、テーブル情報（テーブル一�
 - SQLAlchemy (データベース操作の抽象化)
 - psycopg2-binary (PostgreSQLアダプタ)
 - Pandas (データ移行時のデータ操作)
-- Poetry (依存関係管理)
 
 ## セットアップ方法
 
@@ -38,16 +37,44 @@ PostgreSQLデータベースへの接続、テーブル情報（テーブル一�
     cd <リポジトリ名>
     ```
 
-2.  **Poetryのインストール (まだの場合):**
-    Poetryの公式ドキュメントに従ってインストールしてください。
-    [https://python-poetry.org/docs/#installation](https://python-poetry.org/docs/#installation)
+## 仮想環境のセットアップ (venv)
 
-3.  **依存関係のインストール:**
-    プロジェクトルートディレクトリで以下のコマンドを実行します。
+1.  **Pythonのインストール確認:**
+    このプロジェクトでは Python 3.12 以上を推奨します。ターミナルで以下のコマンドを実行して、Pythonのバージョンを確認してください。
     ```bash
-    poetry install
+    python --version
+    # または
+    python3 --version
     ```
-    これにより、`pyproject.toml` と `poetry.lock` に基づいて仮想環境が作成され、必要なライブラリがインストールされます。
+    Pythonがインストールされていない場合、またはバージョンが古い場合は、[Python公式サイト](https://www.python.org/)からダウンロードしてインストールしてください。
+
+2.  **仮想環境の作成:**
+    プロジェクトのルートディレクトリで、以下のコマンドを実行して仮想環境を作成します。`.venv` は仮想環境のディレクトリ名です。
+    ```bash
+    python -m venv .venv
+    ```
+
+3.  **仮想環境のアクティベート:**
+    作成した仮想環境をアクティベートします。
+    -   **Windows (コマンドプロンプト):**
+        ```bash
+        .venv\Scripts\activate
+        ```
+    -   **Windows (PowerShell):**
+        ```bash
+        .venv\Scripts\Activate.ps1
+        ```
+    -   **macOS / Linux (bash/zsh):**
+        ```bash
+        source .venv/bin/activate
+        ```
+    アクティベートされると、プロンプトの先頭に `(.venv)` のように表示されます。
+
+4.  **依存関係のインストール:**
+    仮想環境がアクティベートされた状態で、以下のコマンドを実行して必要なライブラリをインストールします。
+    ```bash
+    pip install -r requirements.txt
+    ```
 
 4.  **PostgreSQLデータベースの準備:**
     - このツールで接続するPostgreSQLデータベースが稼働していることを確認してください。
@@ -58,7 +85,7 @@ PostgreSQLデータベースへの接続、テーブル情報（テーブル一�
 1.  **Streamlitアプリケーションの起動:**
     プロジェクトルートディレクトリで以下のコマンドを実行します。
     ```bash
-    poetry run streamlit run app.py
+    python -m streamlit run app.py
     ```
     これにより、Webブラウザでアプリケーションが開きます。
 
