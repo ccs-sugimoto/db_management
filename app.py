@@ -193,14 +193,6 @@ with conn_tab2:
     render_db_connection_form("target")
 
 
-from db_utils import (
-    test_postgres_connection,
-    test_sqlite_connection,
-    get_db_engine,
-    get_table_names,
-    get_table_columns,
-)  # 修正
-
 # --- アプリケーションの状態管理 ---
 if "db_type" not in st.session_state:
     st.session_state.db_type = "postgresql"  # デフォルトはPostgreSQL
