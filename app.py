@@ -767,6 +767,8 @@ from db_utils import (  # インポートを整理
     load_column_mapping,
     delete_column_mapping,
     migrate_data,  # 追加
+    generate_insert_statement,
+    insert_record,
 )
 import pandas as pd
 
