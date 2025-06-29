@@ -55,30 +55,40 @@ def render_mapping_ui():
 
             # 各ソースカラムに対応するターゲットカラムを選択するselectboxを表示
             for i, src_col in enumerate(source_cols):
-                # 現在のセッションに保存されているマッピング情報を取得 (なければ空文字)
-                current_tgt_col = st.session_state.get("column_map", {}).get(src_col, "")
+                col1, col2 = st.columns([2, 3]) # 左カラム幅2、右カラム幅3 (比率は適宜調整)
 
-                # ターゲットカラムの選択肢に、現在マッピングされているカラム名が含まれていない場合、
-                # 一時的に選択肢に追加する (ロードしたマッピングが現在のターゲットテーブルのカラムにない場合など)
-                temp_target_cols_options = list(target_cols_options) # コピーして変更
-                if current_tgt_col and current_tgt_col not in temp_target_cols_options:
-                    temp_target_cols_options.append(current_tgt_col)
+                with col1:
+                    st.markdown(f"`{src_col}` (ソース)")
+                    # 必要であれば、ここにカラムの型情報などを追加表示することも可能
+                    # src_col_type = next((col["type"] for col in st.session_state.get("source_columns", []) if col["name"] == src_col), "")
+                    # st.caption(src_col_type)
 
-                # selectboxのデフォルト選択インデックスを決定
-                try:
-                    idx = temp_target_cols_options.index(current_tgt_col)
-                except ValueError: # マッピング値が選択肢にない場合 (通常は上記で追加されるはず)
-                    idx = 0 # 未選択にする
 
-                selected_tgt_col = st.selectbox(
-                    f"`{src_col}` (ソース)  -> ",
-                    options=temp_target_cols_options,
-                    index=idx,
-                    key=f"mapping_ui_map_{src_col}_to_{i}", # ユニークキー
-                    help=f"ソースカラム '{src_col}' に対応するターゲットカラムを選択または入力してください。"
-                )
-                if selected_tgt_col: # 空文字でなければマッピング対象とする
-                    new_mapping[src_col] = selected_tgt_col
+                with col2:
+                    # 現在のセッションに保存されているマッピング情報を取得 (なければ空文字)
+                    current_tgt_col = st.session_state.get("column_map", {}).get(src_col, "")
+
+                    # ターゲットカラムの選択肢に、現在マッピングされているカラム名が含まれていない場合、
+                    # 一時的に選択肢に追加する (ロードしたマッピングが現在のターゲットテーブルのカラムにない場合など)
+                    temp_target_cols_options = list(target_cols_options) # コピーして変更
+                    if current_tgt_col and current_tgt_col not in temp_target_cols_options:
+                        temp_target_cols_options.append(current_tgt_col)
+
+                    # selectboxのデフォルト選択インデックスを決定
+                    try:
+                        idx = temp_target_cols_options.index(current_tgt_col)
+                    except ValueError: # マッピング値が選択肢にない場合 (通常は上記で追加されるはず)
+                        idx = 0 # 未選択にする
+
+                    selected_tgt_col = st.selectbox(
+                        label="ターゲットカラム →", # ラベルを簡潔に、または label_visibility="collapsed" も検討可
+                        options=temp_target_cols_options,
+                        index=idx,
+                        key=f"mapping_ui_map_{src_col}_to_{i}", # ユニークキー
+                        help=f"ソースカラム '{src_col}' に対応するターゲットカラムを選択または入力してください。"
+                    )
+                    if selected_tgt_col: # 空文字でなければマッピング対象とする
+                        new_mapping[src_col] = selected_tgt_col
 
             # 「このマッピングを適用」ボタン
             if st.button("このマッピングを適用", key="mapping_ui_apply_button"):
