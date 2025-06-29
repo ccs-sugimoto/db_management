@@ -90,11 +90,15 @@ def render_db_connection_form(conn_key_prefix: str):
                             st.session_state.target_tables = table_names
                             st.session_state.target_selected_table = None # テーブル選択をリセット
                             st.session_state.target_columns = []         # カラム情報もリセット
+                        # この下に st.rerun() を追加
+                        st.rerun() # ★ 追記
                     except RuntimeError as e_tables: # get_table_namesでエラーが発生した場合
                         st.error(f"テーブル一覧の取得に失敗しました: {e_tables}")
                         # テーブルリストを空にする
                         if conn_key_prefix == "source": st.session_state.source_tables = []
                         elif conn_key_prefix == "target": st.session_state.target_tables = []
+                        # エラー発生時も再描画するならここにも st.rerun() を追加検討
+                        st.rerun() # ★ 追記 (エラー時も状態をUIに反映するため)
                 else:
                     # get_db_engine が None を返した場合 (通常は例外が発生するが念のため)
                     st.session_state[db_engine_key] = None
@@ -163,11 +167,7 @@ def render_connection_tabs():
     # 「接続1」タブの内容
     with conn_tab1:
         st.write("データ移行のソースDB、または単一DB操作時のターゲットDBとして使用します。")
-        # state.pyで `source_postgres_conn_params` が初期化されているため、
-        # ここでの追加の初期化処理は不要。
-        render_db_connection_form("source") # "source" プレフィックスで接続フォームを描画
 
-        st.markdown("---") # 区切り線
         st.subheader("保存済み接続の利用")
         metadata_engine = st.session_state.get("metadata_engine")
         if metadata_engine:
@@ -199,126 +199,20 @@ def render_connection_tabs():
                         st.error(f"接続情報「{selected_conn_name}」の読み込みに失敗しました。")
             else:
                 st.info("保存されている接続情報はありません。")
-
-            st.markdown("---")
-            st.subheader("保存済み接続の管理")
-
-            # conn_names は上で取得済みなので再利用
-            if conn_names:
-                manage_conn_key_suffix = "_manage_connection_select"
-                manage_selected_conn_name_key = f"conn_ui_source{manage_conn_key_suffix}"
-
-                # 管理対象の接続を選択
-                # selected_manage_conn_name の値をセッション状態で管理
-                if manage_selected_conn_name_key not in st.session_state:
-                    st.session_state[manage_selected_conn_name_key] = "" # 初期値
-
-                st.session_state[manage_selected_conn_name_key] = st.selectbox(
-                    "管理する接続を選択:",
-                    options=[""] + conn_names,
-                    key=f"conn_ui_source_manage_selectbox", # selectbox自体のキー
-                    index=([""] + conn_names).index(st.session_state[manage_selected_conn_name_key]) if st.session_state[manage_selected_conn_name_key] in ([""] + conn_names) else 0
-                )
-                selected_manage_conn_name = st.session_state[manage_selected_conn_name_key]
-
-
-                if selected_manage_conn_name:
-                    loaded_manage_info = load_connection_info(metadata_engine, selected_manage_conn_name)
-                    if loaded_manage_info and loaded_manage_info["db_type"] == "postgresql":
-                        st.write(f"「{selected_manage_conn_name}」を編集中...")
-
-                        edit_params = {}
-                        edit_params["new_name"] = st.text_input(
-                            "新しい接続名",
-                            value=loaded_manage_info.get("name", ""),
-                            key="conn_ui_source_edit_name"
-                        )
-                        edit_params["host"] = st.text_input(
-                            "ホスト (編集)", value=loaded_manage_info.get("host", ""),
-                            key="conn_ui_source_edit_host"
-                        )
-                        edit_params["port"] = st.text_input(
-                            "ポート (編集)", value=loaded_manage_info.get("port", ""),
-                            key="conn_ui_source_edit_port"
-                        )
-                        edit_params["db_name"] = st.text_input(
-                            "データベース名 (編集)", value=loaded_manage_info.get("db_name", ""),
-                            key="conn_ui_source_edit_dbname"
-                        )
-                        edit_params["user"] = st.text_input(
-                            "ユーザー名 (編集)", value=loaded_manage_info.get("user", ""),
-                            key="conn_ui_source_edit_user"
-                        )
-                        edit_params["password"] = st.text_input(
-                            "パスワード (編集)", type="password", value=loaded_manage_info.get("password", ""),
-                            key="conn_ui_source_edit_password"
-                        )
-
-                        if st.button("変更を保存 (Source)", key="conn_ui_source_update_button"):
-                            update_success, update_msg = update_connection_info(
-                                metadata_engine,
-                                original_name=selected_manage_conn_name,
-                                new_name=edit_params["new_name"],
-                                db_type="postgresql", # 現状はPostgreSQLのみ
-                                params={
-                                    "host": edit_params["host"], "port": edit_params["port"],
-                                    "db_name": edit_params["db_name"], "user": edit_params["user"],
-                                    "password": edit_params["password"]
-                                }
-                            )
-                            if update_success:
-                                st.success(update_msg)
-                                # 選択中の管理接続名を新しい名前に更新、またはリセット
-                                st.session_state[manage_selected_conn_name_key] = edit_params["new_name"] if edit_params["new_name"] in get_connection_names(metadata_engine) else ""
-                                st.rerun()
-                            else:
-                                st.error(update_msg)
-
-                        # 削除機能
-                        st.markdown("---")
-                        show_confirm_delete_key = "conn_ui_source_show_confirm_delete"
-                        if show_confirm_delete_key not in st.session_state:
-                            st.session_state[show_confirm_delete_key] = False
-
-                        if st.button(f"「{selected_manage_conn_name}」を削除", key="conn_ui_source_delete_button"):
-                            st.session_state[show_confirm_delete_key] = True
-
-                        if st.session_state[show_confirm_delete_key]:
-                            st.warning(f"本当に「{selected_manage_conn_name}」を削除しますか？この操作は取り消せません。")
-                            if st.button("はい、削除します", type="primary", key="conn_ui_source_confirm_delete_button"):
-                                delete_success, delete_msg = delete_connection_info(metadata_engine, selected_manage_conn_name)
-                                if delete_success:
-                                    st.success(delete_msg)
-                                    st.session_state[manage_selected_conn_name_key] = "" # 選択をリセット
-                                    st.session_state[show_confirm_delete_key] = False
-                                    st.rerun()
-                                else:
-                                    st.error(delete_msg)
-                                    st.session_state[show_confirm_delete_key] = False # エラー時も確認は閉じる
-                            if st.button("キャンセル", key="conn_ui_source_cancel_delete_button"):
-                                st.session_state[show_confirm_delete_key] = False
-                                st.rerun()
-
-                    elif loaded_manage_info and loaded_manage_info["db_type"] != "postgresql":
-                        st.warning(f"このUIは現在PostgreSQL接続の管理のみをサポートしています。選択された接続タイプ: {loaded_manage_info['db_type']}")
-                    elif not selected_manage_conn_name: # selected_manage_conn_name が空（未選択）の場合
-                        pass # 何も表示しない
-                    else: # load_connection_info が None を返した場合など
-                        st.error(f"接続情報「{selected_manage_conn_name}」の読み込みに失敗したか、存在しません。")
-            else: # conn_names が空の場合
-                 st.info("管理対象の保存済み接続情報はありません。")
         else:
-            st.info("メタデータDBが初期化されていないため、保存済み接続の管理機能は利用できません。")
+            st.info("メタデータDBが初期化されていないため、保存済み接続の利用機能は利用できません。") # メッセージを修正
+
+        st.markdown("---") # 区切り線
+
+        # state.pyで `source_postgres_conn_params` が初期化されているため、
+        # ここでの追加の初期化処理は不要。
+        render_db_connection_form("source") # "source" プレフィックスで接続フォームを描画
 
 
     # 「接続2」タブの内容
     with conn_tab2:
         st.write("データ移行のターゲットDBとして使用します。接続1と同じDBを指定することも可能です。")
-        # state.pyで `target_postgres_conn_params` が初期化されているため、
-        # ここでの追加の初期化処理は不要。
-        render_db_connection_form("target") # "target" プレフィックスで接続フォームを描画
 
-        st.markdown("---") # 区切り線
         st.subheader("保存済み接続の利用")
         metadata_engine = st.session_state.get("metadata_engine")
         if metadata_engine:
@@ -348,109 +242,14 @@ def render_connection_tabs():
                         st.error(f"接続情報「{selected_conn_name_target}」の読み込みに失敗しました。")
             else:
                 st.info("保存されている接続情報はありません。")
-
-            st.markdown("---")
-            st.subheader("保存済み接続の管理")
-
-            if conn_names: # conn_names は上で取得済みなので再利用
-                manage_conn_key_suffix_target = "_manage_connection_select"
-                manage_selected_conn_name_key_target = f"conn_ui_target{manage_conn_key_suffix_target}"
-
-                if manage_selected_conn_name_key_target not in st.session_state:
-                    st.session_state[manage_selected_conn_name_key_target] = ""
-
-                st.session_state[manage_selected_conn_name_key_target] = st.selectbox(
-                    "管理する接続を選択:",
-                    options=[""] + conn_names,
-                    key=f"conn_ui_target_manage_selectbox",
-                    index=([""] + conn_names).index(st.session_state[manage_selected_conn_name_key_target]) if st.session_state[manage_selected_conn_name_key_target] in ([""] + conn_names) else 0
-                )
-                selected_manage_conn_name_target = st.session_state[manage_selected_conn_name_key_target]
-
-                if selected_manage_conn_name_target:
-                    loaded_manage_info_target = load_connection_info(metadata_engine, selected_manage_conn_name_target)
-                    if loaded_manage_info_target and loaded_manage_info_target["db_type"] == "postgresql":
-                        st.write(f"「{selected_manage_conn_name_target}」を編集中...")
-
-                        edit_params_target = {}
-                        edit_params_target["new_name"] = st.text_input(
-                            "新しい接続名",
-                            value=loaded_manage_info_target.get("name", ""),
-                            key="conn_ui_target_edit_name"
-                        )
-                        edit_params_target["host"] = st.text_input(
-                            "ホスト (編集)", value=loaded_manage_info_target.get("host", ""),
-                            key="conn_ui_target_edit_host"
-                        )
-                        edit_params_target["port"] = st.text_input(
-                            "ポート (編集)", value=loaded_manage_info_target.get("port", ""),
-                            key="conn_ui_target_edit_port"
-                        )
-                        edit_params_target["db_name"] = st.text_input(
-                            "データベース名 (編集)", value=loaded_manage_info_target.get("db_name", ""),
-                            key="conn_ui_target_edit_dbname"
-                        )
-                        edit_params_target["user"] = st.text_input(
-                            "ユーザー名 (編集)", value=loaded_manage_info_target.get("user", ""),
-                            key="conn_ui_target_edit_user"
-                        )
-                        edit_params_target["password"] = st.text_input(
-                            "パスワード (編集)", type="password", value=loaded_manage_info_target.get("password", ""),
-                            key="conn_ui_target_edit_password"
-                        )
-
-                        if st.button("変更を保存 (Target)", key="conn_ui_target_update_button"):
-                            update_success_target, update_msg_target = update_connection_info(
-                                metadata_engine,
-                                original_name=selected_manage_conn_name_target,
-                                new_name=edit_params_target["new_name"],
-                                db_type="postgresql",
-                                params={
-                                    "host": edit_params_target["host"], "port": edit_params_target["port"],
-                                    "db_name": edit_params_target["db_name"], "user": edit_params_target["user"],
-                                    "password": edit_params_target["password"]
-                                }
-                            )
-                            if update_success_target:
-                                st.success(update_msg_target)
-                                st.session_state[manage_selected_conn_name_key_target] = edit_params_target["new_name"] if edit_params_target["new_name"] in get_connection_names(metadata_engine) else ""
-                                st.rerun()
-                            else:
-                                st.error(update_msg_target)
-
-                        st.markdown("---")
-                        show_confirm_delete_key_target = "conn_ui_target_show_confirm_delete"
-                        if show_confirm_delete_key_target not in st.session_state:
-                            st.session_state[show_confirm_delete_key_target] = False
-
-                        if st.button(f"「{selected_manage_conn_name_target}」を削除", key="conn_ui_target_delete_button"):
-                            st.session_state[show_confirm_delete_key_target] = True
-
-                        if st.session_state[show_confirm_delete_key_target]:
-                            st.warning(f"本当に「{selected_manage_conn_name_target}」を削除しますか？この操作は取り消せません。")
-                            if st.button("はい、削除します", type="primary", key="conn_ui_target_confirm_delete_button"):
-                                delete_success_target, delete_msg_target = delete_connection_info(metadata_engine, selected_manage_conn_name_target)
-                                if delete_success_target:
-                                    st.success(delete_msg_target)
-                                    st.session_state[manage_selected_conn_name_key_target] = ""
-                                    st.session_state[show_confirm_delete_key_target] = False
-                                    st.rerun()
-                                else:
-                                    st.error(delete_msg_target)
-                                    st.session_state[show_confirm_delete_key_target] = False
-                            if st.button("キャンセル", key="conn_ui_target_cancel_delete_button"):
-                                st.session_state[show_confirm_delete_key_target] = False
-                                st.rerun()
-                    elif loaded_manage_info_target and loaded_manage_info_target["db_type"] != "postgresql":
-                        st.warning(f"このUIは現在PostgreSQL接続の管理のみをサポートしています。選択された接続タイプ: {loaded_manage_info_target['db_type']}")
-                    elif not selected_manage_conn_name_target:
-                        pass
-                    else:
-                        st.error(f"接続情報「{selected_manage_conn_name_target}」の読み込みに失敗したか、存在しません。")
-            else: # conn_names が空の場合 (target タブでも同じ conn_names を参照)
-                 st.info("管理対象の保存済み接続情報はありません。")
         else:
-            st.info("メタデータDBが初期化されていないため、保存済み接続の管理機能は利用できません。")
+            st.info("メタデータDBが初期化されていないため、保存済み接続の利用機能は利用できません。") # メッセージを修正
+
+        st.markdown("---") # 区切り線
+
+        # state.pyで `target_postgres_conn_params` が初期化されているため、
+        # ここでの追加の初期化処理は不要。
+        render_db_connection_form("target") # "target" プレフィックスで接続フォームを描画
 
     # 開発者向けメモ:
     # 以前のapp.pyにあった render_db_connection_form の古いバージョンや重複した定義は、
