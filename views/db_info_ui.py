@@ -17,53 +17,73 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
     if engine: # エンジンがNoneでない（接続が確立されている）場合のみ処理
         st.subheader(f"{db_label} 情報") # 例: "接続1 (ソース) 情報"
 
-        # セッション状態からテーブルリストを取得、なければ空リスト
-        tables = st.session_state.get(tables_key, [])
+        # セッション状態からテーブル情報リスト (辞書のリスト) を取得、なければ空リスト
+        tables_info_list = st.session_state.get(tables_key, [])
 
-        # テーブルリストが空で、かつエンジンが存在する場合、テーブル情報を再取得試行
-        # (例: 初回表示時や、接続後にまだテーブル情報を読み込んでいない場合)
-        if not tables and engine:
+        # テーブル情報リストが空で、かつエンジンが存在する場合、テーブル情報を再取得試行
+        if not tables_info_list and engine:
             try:
-                tables = get_table_names(engine)
-                st.session_state[tables_key] = tables # 取得したテーブルリストをセッション状態に保存
+                tables_info_list = get_table_names(engine) # get_table_namesは list[dict] を返す
+                st.session_state[tables_key] = tables_info_list # 取得したリストをセッション状態に保存
             except RuntimeError as e:
                 st.error(f"{db_label} のテーブル一覧取得に失敗: {e}")
                 st.session_state[tables_key] = []  # エラー時は空リストを設定
-                tables = [] # ローカル変数も更新
+                tables_info_list = [] # ローカル変数も更新
 
-        if tables: # 表示するテーブルがある場合
-            # 現在選択されているテーブルをセッション状態から取得
-            current_selected_table = st.session_state.get(selected_table_key)
+        if tables_info_list: # 表示するテーブル情報がある場合
+            # 物理名のリストを作成 (selectboxのoptions用)
+            physical_table_names = [table_info["name"] for table_info in tables_info_list]
+
+            # format_func を定義
+            def format_table_name(physical_name):
+                if not physical_name: # 空の選択肢の場合
+                    return "選択してください"
+                # tables_info_list から該当するテーブル情報を検索
+                table_info = next((t for t in tables_info_list if t["name"] == physical_name), None)
+                if table_info:
+                    comment = table_info.get("comment")
+                    return f"{physical_name} ({comment})" if comment else physical_name
+                return physical_name # 見つからなければ物理名のみ
+
+            # 現在選択されている物理テーブル名をセッション状態から取得
+            current_selected_physical_table = st.session_state.get(selected_table_key)
 
             # selectboxのデフォルト選択インデックスを計算
             select_idx = 0 # デフォルトは未選択 (optionsの先頭 "")
-            if current_selected_table and current_selected_table in tables:
+            if current_selected_physical_table and current_selected_physical_table in physical_table_names:
                 try:
-                    select_idx = tables.index(current_selected_table) + 1 # +1 は先頭の未選択オプション分
+                    select_idx = physical_table_names.index(current_selected_physical_table) + 1 # +1 は先頭の未選択オプション分
                 except ValueError:
-                    # tablesリストにcurrent_selected_tableが存在しない場合(キャッシュ等で古い値が残っているなど)
                     st.session_state[selected_table_key] = None # 選択をリセット
 
             # テーブル選択のselectbox
-            selected_table = st.selectbox(
+            selected_physical_table = st.selectbox(
                 f"{db_label} テーブル一覧",
-                options=[""] + tables,  # 先頭に空の選択肢（未選択状態）を追加
+                options=[""] + physical_table_names,  # 先頭に空の選択肢を追加
                 index=select_idx,
+                format_func=format_table_name, # 表示名整形関数
                 key=f"db_info_ui_{db_label}_table_select", # ユニークキー
             )
-            # 選択されたテーブル名をセッション状態に保存
-            st.session_state[selected_table_key] = selected_table if selected_table else None
+            # 選択された物理テーブル名をセッション状態に保存
+            st.session_state[selected_table_key] = selected_physical_table if selected_physical_table else None
 
-            # テーブルが選択されている場合、そのカラム情報を表示
+            # 物理テーブル名が選択されている場合、そのカラム情報を表示
             if st.session_state.get(selected_table_key):
                 try:
                     # 選択されたテーブルのカラム情報を取得
                     columns = get_table_columns(engine, st.session_state.get(selected_table_key))
-                    st.session_state[columns_key] = columns # カラム情報をセッション状態に保存
+                    st.session_state[columns_key] = columns # カラム情報 (list[dict]) をセッション状態に保存
 
                     if columns:
                         st.write(f"テーブル '{st.session_state.get(selected_table_key)}' のカラム:")
-                        st.dataframe(columns, use_container_width=True) # カラム情報をデータフレームで表示
+                        # DataFrameに変換し、表示する列を指定・整形
+                        df_columns = pd.DataFrame(columns)
+                        # 表示用に'comment'がNoneの場合は空文字に置換
+                        df_columns["comment"] = df_columns["comment"].fillna("")
+                        # 表示するカラムの順序と名前を定義
+                        display_df = df_columns[["name", "type", "comment"]]
+                        display_df = display_df.rename(columns={"name": "物理名", "type": "型", "comment": "論理名"})
+                        st.dataframe(display_df, use_container_width=True)
                     else:
                         st.info(f"テーブル '{st.session_state.get(selected_table_key)}' にカラムが見つかりません。")
                 except RuntimeError as e:

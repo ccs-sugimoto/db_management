@@ -116,8 +116,35 @@ def get_table_names(engine):
         RuntimeError: テーブル一覧の取得に失敗した場合。
     """
     try:
-        inspector = inspect(engine) # インスペクタを取得
-        return inspector.get_table_names()
+        if engine.dialect.name == "postgresql":
+            # PostgreSQLの場合、テーブル名とコメントを取得するクエリ
+            # INFORMATION_SCHEMA.TABLES と pg_catalog.pg_description を使用
+            # obj_description はOIDを引数に取るため、テーブルのOIDを取得する必要がある
+            # pg_class からテーブル名とスキーマ名でOIDを取得し、それを利用する
+            query = text("""
+                SELECT
+                    t.table_name AS name,
+                    pg_catalog.obj_description(pc.oid, 'pg_class') AS comment
+                FROM
+                    information_schema.tables t
+                JOIN
+                    pg_catalog.pg_class pc ON pc.relname = t.table_name
+                JOIN
+                    pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
+                WHERE
+                    t.table_schema = 'public'  -- デフォルトはpublicスキーマ
+                    AND t.table_type = 'BASE TABLE'
+                ORDER BY
+                    t.table_name;
+            """)
+            with engine.connect() as connection:
+                result = connection.execute(query)
+                return [{"name": row.name, "comment": row.comment or ""} for row in result]
+        else:
+            # PostgreSQL以外の場合は既存の処理
+            inspector = inspect(engine)
+            table_names = inspector.get_table_names()
+            return [{"name": name, "comment": None} for name in table_names]
     except Exception as e:
         # UI関連のエラー表示は呼び出し元で行う
         raise RuntimeError(f"テーブル一覧の取得に失敗しました: {e}")
@@ -137,10 +164,39 @@ def get_table_columns(engine, table_name):
         RuntimeError: カラム情報の取得に失敗した場合。
     """
     try:
-        inspector = inspect(engine) # インスペクタを取得
-        columns = inspector.get_columns(table_name)
-        # カラム名と型(文字列として)を抽出してリスト化
-        return [{"name": col["name"], "type": str(col["type"])} for col in columns]
+        if engine.dialect.name == "postgresql":
+            # PostgreSQLの場合、カラム名、型、コメントを取得するクエリ
+            # INFORMATION_SCHEMA.COLUMNS と pg_catalog.pg_description を使用
+            # スキーマ名を 'public' に固定せず、テーブル名にスキーマが含まれている可能性を考慮
+            # table_name が "schema.table" の形式である場合に対応
+            schema_name, actual_table_name = table_name.split('.') if '.' in table_name else ('public', table_name)
+
+            query = text("""
+                SELECT
+                    c.column_name AS name,
+                    c.data_type AS type,
+                    pg_catalog.col_description(pc.oid, c.ordinal_position::int) AS comment
+                FROM
+                    information_schema.columns c
+                JOIN
+                    pg_catalog.pg_class pc ON pc.relname = c.table_name
+                JOIN
+                    pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
+                WHERE
+                    c.table_schema = :schema_name_param
+                    AND c.table_name = :table_name_param
+                ORDER BY
+                    c.ordinal_position;
+            """)
+            with engine.connect() as connection:
+                result = connection.execute(query, {"schema_name_param": schema_name, "table_name_param": actual_table_name})
+                return [{"name": row.name, "type": row.type, "comment": row.comment or ""} for row in result]
+        else:
+            # PostgreSQL以外の場合は既存の処理
+            inspector = inspect(engine)
+            columns = inspector.get_columns(table_name)
+            # カラム名と型(文字列として)を抽出してリスト化
+            return [{"name": col["name"], "type": str(col["type"]), "comment": None} for col in columns]
     except Exception as e:
         # UI関連のエラー表示は呼び出し元で行う
         raise RuntimeError(
@@ -173,6 +229,22 @@ def create_metadata_tables_if_not_exists(engine):
                     source_table TEXT NOT NULL,           -- ソーステーブル名
                     target_table TEXT NOT NULL,           -- ターゲットテーブル名
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- 作成日時
+                )
+            """)
+            )
+            # 保存された接続情報を格納するテーブル
+            connection.execute(
+                text("""
+                CREATE TABLE IF NOT EXISTS saved_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    db_type TEXT NOT NULL,
+                    host TEXT,
+                    port TEXT,
+                    db_name TEXT,
+                    user TEXT,
+                    password TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             )
@@ -388,6 +460,224 @@ def delete_column_mapping(engine, mapping_name):
     except Exception as e:
         connection.rollback()
         return False, f"マッピング '{mapping_name}' の削除に失敗しました: {e}"
+
+
+# --- 接続情報管理関数 ---
+
+def save_connection_info(engine, name, db_type, params):
+    """接続情報をメタデータDB (SQLite) に保存します。
+    同名の接続情報が存在する場合は更新し、存在しない場合は新規作成します。
+
+    Args:
+        engine (sqlalchemy.engine.Engine): メタデータDBのエンジン。
+        name (str): 保存する接続設定の名前。
+        db_type (str): データベースタイプ ("postgresql" または "sqlite")。
+        params (dict): 接続に必要なパラメータの辞書。
+                       (例: {"host": "localhost", "port": "5432", ...})
+
+    Returns:
+        tuple: (bool, str) 保存の成否とメッセージ。
+    """
+    with engine.connect() as connection:
+        try:
+            # 既存の接続情報を名前で検索
+            result = connection.execute(
+                text("SELECT id FROM saved_connections WHERE name = :name"),
+                {"name": name},
+            ).fetchone()
+
+            # params 辞書から各値を取得 (存在しないキーの場合は None)
+            host = params.get("host")
+            port = params.get("port")
+            db_name = params.get("db_name")
+            user = params.get("user")
+            password = params.get("password") # 平文で保存
+
+            if result:  # 既存設定がある場合
+                config_id = result[0]
+                # saved_connections テーブルのレコードを更新
+                connection.execute(
+                    text("""
+                        UPDATE saved_connections
+                        SET db_type = :db_type, host = :host, port = :port,
+                            db_name = :db_name, user = :user, password = :password
+                        WHERE id = :config_id
+                    """),
+                    {
+                        "db_type": db_type,
+                        "host": host,
+                        "port": port,
+                        "db_name": db_name,
+                        "user": user,
+                        "password": password,
+                        "config_id": config_id,
+                    },
+                )
+            else:  # 新規作成の場合
+                insert_sql = text("""
+                    INSERT INTO saved_connections (name, db_type, host, port, db_name, user, password)
+                    VALUES (:name, :db_type, :host, :port, :db_name, :user, :password)
+                """)
+                connection.execute(
+                    insert_sql,
+                    {
+                        "name": name,
+                        "db_type": db_type,
+                        "host": host,
+                        "port": port,
+                        "db_name": db_name,
+                        "user": user,
+                        "password": password,
+                    },
+                )
+            connection.commit()
+            return True, f"接続情報 '{name}' を保存しました。"
+        except Exception as e:
+            connection.rollback()
+            return False, f"接続情報 '{name}' の保存に失敗しました: {e}"
+
+
+def get_connection_names(engine):
+    """保存されている全ての接続設定の名前をリストで取得します。
+
+    Args:
+        engine (sqlalchemy.engine.Engine): メタデータDBのエンジン。
+
+    Returns:
+        list: 接続設定名のリスト。エラー時は空リスト。
+    """
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                text("SELECT name FROM saved_connections ORDER BY name") # 名前順で取得
+            )
+            return [row[0] for row in result.fetchall()]
+    except Exception as e:
+        print(f"接続設定名の取得中にエラー: {e}") # ログ出力は行う
+        return []
+
+
+def load_connection_info(engine, name):
+    """指定された名前の接続情報を読み込みます。
+
+    Args:
+        engine (sqlalchemy.engine.Engine): メタデータDBのエンジン。
+        name (str): 読み込む接続設定の名前。
+
+    Returns:
+        dict: 接続情報の辞書 (例: {"name": "my_pg", "db_type": "postgresql", ...})。
+              見つからない場合やエラー時は None。
+    """
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                text("SELECT name, db_type, host, port, db_name, user, password FROM saved_connections WHERE name = :name"),
+                {"name": name},
+            ).fetchone()
+
+            if result:
+                # カラム名と値を対応付けた辞書を作成
+                columns = ["name", "db_type", "host", "port", "db_name", "user", "password"]
+                return dict(zip(columns, result))
+            else:
+                return None # 指定された名前の設定が見つからない
+    except Exception as e:
+        print(f"接続情報 '{name}' の読み込み中にエラー: {e}") # ログ出力
+        return None
+
+
+def delete_connection_info(engine, name):
+    """指定された名前の接続情報をメタデータDBから削除します。
+
+    Args:
+        engine (sqlalchemy.engine.Engine): メタデータDBのエンジン。
+        name (str): 削除する接続設定の名前。
+
+    Returns:
+        tuple: (bool, str) 削除の成否とメッセージ。
+    """
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                text("DELETE FROM saved_connections WHERE name = :name"),
+                {"name": name},
+            )
+            connection.commit()
+            if result.rowcount > 0: # 削除された行数を確認
+                return True, f"接続情報 '{name}' を削除しました。"
+            else:
+                return False, f"接続情報 '{name}' が見つかりません。"
+    except Exception as e:
+        connection.rollback()
+        return False, f"接続情報 '{name}' の削除に失敗しました: {e}"
+
+
+def update_connection_info(engine, original_name, new_name, db_type, params):
+    """接続情報を更新します。名前の変更も可能です。
+
+    Args:
+        engine (sqlalchemy.engine.Engine): メタデータDBのエンジン。
+        original_name (str): 更新対象の元の接続設定の名前。
+        new_name (str): 新しい接続設定の名前。
+        db_type (str): 新しいデータベースタイプ。
+        params (dict): 新しい接続パラメータ。
+
+    Returns:
+        tuple: (bool, str) 更新の成否とメッセージ。
+    """
+    with engine.connect() as connection:
+        try:
+            # まず、元の名前の接続情報が存在するか確認
+            check_result = connection.execute(
+                text("SELECT id FROM saved_connections WHERE name = :original_name"),
+                {"original_name": original_name}
+            ).fetchone()
+
+            if not check_result:
+                return False, f"接続情報 '{original_name}' が見つかりません。"
+
+            config_id = check_result[0]
+
+            # 新しい名前が元の名前と異なり、かつ新しい名前が既に存在するか確認 (ユニーク制約違反を避けるため)
+            if original_name != new_name:
+                name_check_result = connection.execute(
+                    text("SELECT id FROM saved_connections WHERE name = :new_name"),
+                    {"new_name": new_name}
+                ).fetchone()
+                if name_check_result:
+                    return False, f"新しい接続名 '{new_name}' は既に使用されています。"
+
+            # params 辞書から各値を取得
+            host = params.get("host")
+            port = params.get("port")
+            db_name = params.get("db_name")
+            user = params.get("user")
+            password = params.get("password")
+
+            # saved_connections テーブルのレコードを更新
+            connection.execute(
+                text("""
+                    UPDATE saved_connections
+                    SET name = :new_name, db_type = :db_type, host = :host, port = :port,
+                        db_name = :db_name, user = :user, password = :password
+                    WHERE id = :config_id
+                """),
+                {
+                    "new_name": new_name,
+                    "db_type": db_type,
+                    "host": host,
+                    "port": port,
+                    "db_name": db_name,
+                    "user": user,
+                    "password": password,
+                    "config_id": config_id,
+                },
+            )
+            connection.commit()
+            return True, f"接続情報 '{original_name}' を '{new_name}' に更新しました。"
+        except Exception as e:
+            connection.rollback()
+            return False, f"接続情報 '{original_name}' の更新に失敗しました: {e}"
 
 
 if __name__ == "__main__":
