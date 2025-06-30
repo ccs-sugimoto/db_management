@@ -23,7 +23,20 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
         # テーブル情報リストが空で、かつエンジンが存在する場合、テーブル情報を再取得試行
         if not tables_info_list and engine:
             try:
-                tables_info_list = get_table_names(engine) # get_table_namesは list[dict] を返す
+                # スキーマ名を決定するロジック
+                schema_to_use = "public" # デフォルト値
+                # PostgreSQLの場合のみ、セッション状態からスキーマ名を取得試行
+                if engine.dialect.name == "postgresql":
+                    if db_label == "接続1 (ソース)":
+                        schema_to_use = st.session_state.get("source_postgres_conn_params", {}).get("schema_name", "public")
+                    elif db_label == "接続2 (ターゲット)":
+                        schema_to_use = st.session_state.get("target_postgres_conn_params", {}).get("schema_name", "public")
+
+                # スキーマ名が空文字やNoneの場合は 'public' にフォールバック
+                if not schema_to_use:
+                    schema_to_use = "public"
+
+                tables_info_list = get_table_names(engine, schema_name=schema_to_use) # 動的に取得したスキーマ名を使用
                 st.session_state[tables_key] = tables_info_list # 取得したリストをセッション状態に保存
             except RuntimeError as e:
                 st.error(f"{db_label} のテーブル一覧取得に失敗: {e}")

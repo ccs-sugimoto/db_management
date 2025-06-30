@@ -20,6 +20,7 @@ def initialize_session_state():
             "db_name": "",  # ユーザーが入力
             "user": "",     # ユーザーが入力
             "password": "", # ユーザーが入力
+            "schema_name": "public", # スキーマ名
         }
 
     # SQLite接続パラメータ (メタデータDB用)

@@ -103,24 +103,22 @@ def get_db_engine(db_type, connection_params):
         raise Exception(f"エンジン取得中に予期せぬエラーが発生しました: {e}")
 
 
-def get_table_names(engine):
+def get_table_names(engine, schema_name="public"):
     """データベースエンジンからテーブル名のリストを取得します。
 
     Args:
         engine (sqlalchemy.engine.Engine): SQLAlchemyエンジン。
+        schema_name (str, optional): スキーマ名。デフォルトは "public"。
 
     Returns:
-        list: テーブル名のリスト。
+        list: テーブル名とコメントを含む辞書のリスト (例: [{"name": "table1", "comment": "comment1"}, ...])。
 
     Raises:
         RuntimeError: テーブル一覧の取得に失敗した場合。
     """
     try:
         if engine.dialect.name == "postgresql":
-            # PostgreSQLの場合、テーブル名とコメントを取得するクエリ
-            # INFORMATION_SCHEMA.TABLES と pg_catalog.pg_description を使用
-            # obj_description はOIDを引数に取るため、テーブルのOIDを取得する必要がある
-            # pg_class からテーブル名とスキーマ名でOIDを取得し、それを利用する
+            # PostgreSQLの場合、指定されたスキーマのテーブル名とコメントを取得するクエリ
             query = text("""
                 SELECT
                     t.table_name AS name,
@@ -132,22 +130,30 @@ def get_table_names(engine):
                 JOIN
                     pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
                 WHERE
-                    t.table_schema = 'public'  -- デフォルトはpublicスキーマ
+                    t.table_schema = :schema_name_param
+                    AND pn.nspname = :schema_name_param
                     AND t.table_type = 'BASE TABLE'
                 ORDER BY
                     t.table_name;
             """)
             with engine.connect() as connection:
-                result = connection.execute(query)
+                result = connection.execute(query, {"schema_name_param": schema_name})
                 return [{"name": row.name, "comment": row.comment or ""} for row in result]
         else:
-            # PostgreSQL以外の場合は既存の処理
+            # PostgreSQL以外の場合
             inspector = inspect(engine)
-            table_names = inspector.get_table_names()
-            return [{"name": name, "comment": None} for name in table_names]
+            # schema_nameがNoneまたは空文字列の場合、デフォルトのスキーマ（または全スキーマ）を期待
+            # SQLAlchemy inspectorは schema=None を適切に処理する
+            # "public" が指定された場合も、それがデフォルトスキーマとして扱われることを期待
+            # もし明示的に「全てのスキーマ」を意図する場合は、この関数のインターフェース変更が必要
+            effective_schema_name = schema_name if schema_name and schema_name.strip() else None
+
+            # 既存のget_table_namesはコメントを返さないため、PostgreSQL以外ではコメントはNoneとする
+            table_names_list = inspector.get_table_names(schema=effective_schema_name)
+            return [{"name": name, "comment": None} for name in table_names_list]
     except Exception as e:
         # UI関連のエラー表示は呼び出し元で行う
-        raise RuntimeError(f"テーブル一覧の取得に失敗しました: {e}")
+        raise RuntimeError(f"テーブル一覧の取得に失敗しました (スキーマ: {schema_name}): {e}")
 
 
 def get_table_columns(engine, table_name):

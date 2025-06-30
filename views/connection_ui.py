@@ -63,6 +63,11 @@ def render_db_connection_form(conn_key_prefix: str):
             value=pg_params.get("password", "password"),
             key=f"conn_ui_{conn_key_prefix}_pg_password",
         )
+        pg_params["schema_name"] = st.text_input(
+            f"スキーマ名 [{conn_key_prefix}] (空の場合は'public')",
+            value=pg_params.get("schema_name", "public"), # state.pyで初期化された値を使用
+            key=f"conn_ui_{conn_key_prefix}_pg_schema_name",
+        )
 
         # ユーザーが入力した最新の接続パラメータをセッション状態に保存
         st.session_state[db_params_key] = pg_params
@@ -81,7 +86,12 @@ def render_db_connection_form(conn_key_prefix: str):
 
                     # 接続成功後、テーブル名一覧を取得してセッション状態を更新
                     try:
-                        table_names = get_table_names(engine)
+                        # フォームからスキーマ名を取得 (state.pyのデフォルト値も考慮)
+                        current_schema_name = pg_params.get("schema_name", "public")
+                        if not current_schema_name: # 空文字列が入力された場合は 'public' を使用
+                            current_schema_name = "public"
+
+                        table_names = get_table_names(engine, schema_name=current_schema_name)
                         if conn_key_prefix == "source":
                             st.session_state.source_tables = table_names
                             st.session_state.source_selected_table = None # テーブル選択をリセット
@@ -90,6 +100,15 @@ def render_db_connection_form(conn_key_prefix: str):
                             st.session_state.target_tables = table_names
                             st.session_state.target_selected_table = None # テーブル選択をリセット
                             st.session_state.target_columns = []         # カラム情報もリセット
+
+                        # 接続パラメータ（スキーマ名含む）をセッション状態に保存
+                        # これはst.text_inputのon_changeやコールバックがなくても、
+                        # pg_paramsがst.session_state[db_params_key]を参照していれば自動的に更新されるはずだが、
+                        # 明示的に代入しておくことで確実性を高める。
+                        # ただし、pg_paramsがst.session_state.get()のデフォルト辞書から来ている場合、
+                        # この代入は必須。
+                        st.session_state[db_params_key] = pg_params
+
                         # この下に st.rerun() を追加
                         st.rerun() # ★ 追記
                     except RuntimeError as e_tables: # get_table_namesでエラーが発生した場合
@@ -189,7 +208,8 @@ def render_connection_tabs():
                                 "port": loaded_info.get("port", ""),
                                 "db_name": loaded_info.get("db_name", ""),
                                 "user": loaded_info.get("user", ""),
-                                "password": loaded_info.get("password", "")
+                                "password": loaded_info.get("password", ""),
+                                "schema_name": loaded_info.get("schema_name", "public") # スキーマ名も復元
                             }
                             st.success(f"接続情報「{selected_conn_name}」をフォームに復元しました。")
                             st.rerun() # フォームの表示を更新
@@ -232,7 +252,8 @@ def render_connection_tabs():
                                 "port": loaded_info_target.get("port", ""),
                                 "db_name": loaded_info_target.get("db_name", ""),
                                 "user": loaded_info_target.get("user", ""),
-                                "password": loaded_info_target.get("password", "")
+                                "password": loaded_info_target.get("password", ""),
+                                "schema_name": loaded_info_target.get("schema_name", "public") # スキーマ名も復元
                             }
                             st.success(f"接続情報「{selected_conn_name_target}」をフォームに復元しました。")
                             st.rerun()
