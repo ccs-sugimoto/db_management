@@ -8,12 +8,12 @@ import pandas as pd # データ移行時に使用
 
 # --- 接続文字列生成 ---
 
-def get_postgres_connection_string(db_name, user, password, host, port):
+def get_postgres_connection_string(db_name, user, password, host, port, **kwargs):
     """PostgreSQLデータベースへの接続文字列を生成します。"""
     return f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 
 
-def get_sqlite_connection_string(db_path):
+def get_sqlite_connection_string(db_path, **kwargs):
     """SQLiteデータベースへの接続文字列を生成します。"""
     return f"sqlite:///{db_path}"
 
@@ -156,12 +156,13 @@ def get_table_names(engine, schema_name="public"):
         raise RuntimeError(f"テーブル一覧の取得に失敗しました (スキーマ: {schema_name}): {e}")
 
 
-def get_table_columns(engine, table_name):
+def get_table_columns(engine, table_name, schema_name="public"):
     """指定されたテーブルのカラム情報を取得します。
 
     Args:
         engine (sqlalchemy.engine.Engine): SQLAlchemyエンジン。
         table_name (str): カラム情報を取得するテーブル名。
+        schema_name (str, optional): スキーマ名。デフォルトは "public"。
 
     Returns:
         list: カラム情報の辞書のリスト (例: [{"name": "col1", "type": "VARCHAR"}, ...])。
@@ -175,7 +176,7 @@ def get_table_columns(engine, table_name):
             # INFORMATION_SCHEMA.COLUMNS と pg_catalog.pg_description を使用
             # スキーマ名を 'public' に固定せず、テーブル名にスキーマが含まれている可能性を考慮
             # table_name が "schema.table" の形式である場合に対応
-            schema_name, actual_table_name = table_name.split('.') if '.' in table_name else ('public', table_name)
+            schema_name, actual_table_name = table_name.split('.') if '.' in table_name else (schema_name, table_name)
 
             query = text("""
                 SELECT
@@ -190,6 +191,7 @@ def get_table_columns(engine, table_name):
                     pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
                 WHERE
                     c.table_schema = :schema_name_param
+                    AND pn.nspname = :schema_name_param
                     AND c.table_name = :table_name_param
                 ORDER BY
                     c.ordinal_position;

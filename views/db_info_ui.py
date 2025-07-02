@@ -14,28 +14,31 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
         columns_key (str): セッション状態にカラム情報を保存するためのキー。
         db_label (str): UIに表示するデータベースのラベル (例: "接続1 (ソース)")。
     """
+    schema_name_key = f"{tables_key}_schema_name"
     if engine: # エンジンがNoneでない（接続が確立されている）場合のみ処理
         st.subheader(f"{db_label} 情報") # 例: "接続1 (ソース) 情報"
 
         # セッション状態からテーブル情報リスト (辞書のリスト) を取得、なければ空リスト
         tables_info_list = st.session_state.get(tables_key, [])
 
+        # スキーマ名を決定するロジック
+        schema_to_use = "public" # デフォルト値
+        # PostgreSQLの場合のみ、セッション状態からスキーマ名を取得試行
+        if engine.dialect.name == "postgresql":
+            if db_label == "接続1 (ソース)":
+                schema_to_use = st.session_state.get("source_postgres_conn_params", {}).get("schema_name", "public")
+            elif db_label == "接続2 (ターゲット)":
+                schema_to_use = st.session_state.get("target_postgres_conn_params", {}).get("schema_name", "public")
+
+        # スキーマ名が空文字やNoneの場合は 'public' にフォールバック
+        if not schema_to_use:
+            schema_to_use = "public"
+        # スキーマ名をセッションに保存
+        st.session_state[schema_name_key] = schema_to_use
+
         # テーブル情報リストが空で、かつエンジンが存在する場合、テーブル情報を再取得試行
         if not tables_info_list and engine:
             try:
-                # スキーマ名を決定するロジック
-                schema_to_use = "public" # デフォルト値
-                # PostgreSQLの場合のみ、セッション状態からスキーマ名を取得試行
-                if engine.dialect.name == "postgresql":
-                    if db_label == "接続1 (ソース)":
-                        schema_to_use = st.session_state.get("source_postgres_conn_params", {}).get("schema_name", "public")
-                    elif db_label == "接続2 (ターゲット)":
-                        schema_to_use = st.session_state.get("target_postgres_conn_params", {}).get("schema_name", "public")
-
-                # スキーマ名が空文字やNoneの場合は 'public' にフォールバック
-                if not schema_to_use:
-                    schema_to_use = "public"
-
                 tables_info_list = get_table_names(engine, schema_name=schema_to_use) # 動的に取得したスキーマ名を使用
                 st.session_state[tables_key] = tables_info_list # 取得したリストをセッション状態に保存
             except RuntimeError as e:
@@ -84,7 +87,7 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
             if st.session_state.get(selected_table_key):
                 try:
                     # 選択されたテーブルのカラム情報を取得
-                    columns = get_table_columns(engine, st.session_state.get(selected_table_key))
+                    columns = get_table_columns(engine, st.session_state.get(selected_table_key), st.session_state.get(schema_name_key))
                     st.session_state[columns_key] = columns # カラム情報 (list[dict]) をセッション状態に保存
 
                     if columns:
@@ -96,6 +99,7 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
                         # 表示するカラムの順序と名前を定義
                         display_df = df_columns[["name", "type", "comment"]]
                         display_df = display_df.rename(columns={"name": "物理名", "type": "型", "comment": "論理名"})
+                        display_df.index = display_df.index + 1
                         st.dataframe(display_df, use_container_width=True)
                     else:
                         st.info(f"テーブル '{st.session_state.get(selected_table_key)}' にカラムが見つかりません。")
