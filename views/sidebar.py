@@ -116,6 +116,10 @@ def render_sidebar():
                         "パスワード (編集)", type="password", value=loaded_manage_info.get("password", ""),
                         key="sidebar_conn_manage_edit_password"
                     )
+                    edit_params["schema_name"] = st.sidebar.text_input(
+                        "スキーマ名 (編集)", value=loaded_manage_info.get("schema_name", "public"),
+                        key="sidebar_conn_manage_edit_schema_name"
+                    )
 
                     if st.sidebar.button("変更を保存", key="sidebar_conn_manage_update_button"):
                         update_success, update_msg = update_connection_info(
@@ -126,7 +130,8 @@ def render_sidebar():
                             params={
                                 "host": edit_params["host"], "port": edit_params["port"],
                                 "db_name": edit_params["db_name"], "user": edit_params["user"],
-                                "password": edit_params["password"]
+                                "password": edit_params["password"],
+                                "schema_name": edit_params["schema_name"],
                             }
                         )
                         if update_success:
