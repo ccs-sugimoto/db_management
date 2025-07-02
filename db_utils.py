@@ -252,6 +252,7 @@ def create_metadata_tables_if_not_exists(engine):
                     db_name TEXT,
                     user TEXT,
                     password TEXT,
+                    schema_name TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -500,6 +501,7 @@ def save_connection_info(engine, name, db_type, params):
             db_name = params.get("db_name")
             user = params.get("user")
             password = params.get("password") # 平文で保存
+            schema_name = params.get("schema_name")
 
             if result:  # 既存設定がある場合
                 config_id = result[0]
@@ -508,7 +510,8 @@ def save_connection_info(engine, name, db_type, params):
                     text("""
                         UPDATE saved_connections
                         SET db_type = :db_type, host = :host, port = :port,
-                            db_name = :db_name, user = :user, password = :password
+                            db_name = :db_name, user = :user, password = :password,
+                            schema_name = :schema_name
                         WHERE id = :config_id
                     """),
                     {
@@ -518,13 +521,14 @@ def save_connection_info(engine, name, db_type, params):
                         "db_name": db_name,
                         "user": user,
                         "password": password,
+                        "schema_name": schema_name,
                         "config_id": config_id,
                     },
                 )
             else:  # 新規作成の場合
                 insert_sql = text("""
-                    INSERT INTO saved_connections (name, db_type, host, port, db_name, user, password)
-                    VALUES (:name, :db_type, :host, :port, :db_name, :user, :password)
+                    INSERT INTO saved_connections (name, db_type, host, port, db_name, user, password, schema_name)
+                    VALUES (:name, :db_type, :host, :port, :db_name, :user, :password, :schema_name)
                 """)
                 connection.execute(
                     insert_sql,
@@ -536,6 +540,7 @@ def save_connection_info(engine, name, db_type, params):
                         "db_name": db_name,
                         "user": user,
                         "password": password,
+                        "schema_name": schema_name,
                     },
                 )
             connection.commit()
@@ -579,13 +584,13 @@ def load_connection_info(engine, name):
     try:
         with engine.connect() as connection:
             result = connection.execute(
-                text("SELECT name, db_type, host, port, db_name, user, password FROM saved_connections WHERE name = :name"),
+                text("SELECT name, db_type, host, port, db_name, user, password, schema_name FROM saved_connections WHERE name = :name"),
                 {"name": name},
             ).fetchone()
 
             if result:
                 # カラム名と値を対応付けた辞書を作成
-                columns = ["name", "db_type", "host", "port", "db_name", "user", "password"]
+                columns = ["name", "db_type", "host", "port", "db_name", "user", "password", "schema_name"]
                 return dict(zip(columns, result))
             else:
                 return None # 指定された名前の設定が見つからない
@@ -661,13 +666,14 @@ def update_connection_info(engine, original_name, new_name, db_type, params):
             db_name = params.get("db_name")
             user = params.get("user")
             password = params.get("password")
+            schema_name = params.get("schema_name")
 
             # saved_connections テーブルのレコードを更新
             connection.execute(
                 text("""
                     UPDATE saved_connections
                     SET name = :new_name, db_type = :db_type, host = :host, port = :port,
-                        db_name = :db_name, user = :user, password = :password
+                        db_name = :db_name, user = :user, password = :password, schema_name = :schema_name
                     WHERE id = :config_id
                 """),
                 {
@@ -678,6 +684,7 @@ def update_connection_info(engine, original_name, new_name, db_type, params):
                     "db_name": db_name,
                     "user": user,
                     "password": password,
+                    "schema_name": schema_name,
                     "config_id": config_id,
                 },
             )

@@ -19,11 +19,13 @@ render_sidebar()
 
 # データベース接続UIの描画 (タブ形式)
 from views.connection_ui import render_connection_tabs
-render_connection_tabs()
+with st.expander("接続先データベース設定", expanded=True):
+    render_connection_tabs()
 
 # データベース情報表示UIの描画
 from views.db_info_ui import render_database_info_columns
-render_database_info_columns()
+with st.expander("データベース情報", expanded=True):
+    render_database_info_columns()
 
 # カラムマッピングUIの描画
 from views.mapping_ui import render_mapping_ui

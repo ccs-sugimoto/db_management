@@ -85,13 +85,37 @@ def display_db_info(engine, tables_key: str, selected_table_key: str, columns_ke
 
             # 物理テーブル名が選択されている場合、そのカラム情報を表示
             if st.session_state.get(selected_table_key):
+                selected_physical_table_name = st.session_state.get(selected_table_key) # 物理名を取得
+
+                # 物理名をコピーする機能
+                st.markdown("##### 選択中テーブルの物理名") # 小見出し
+                copy_col1, copy_col2 = st.columns([0.3, 0.7]) # ボタンと表示エリアの列分け
+                with copy_col1:
+                    if st.button("📋 コピー用表示", key=f"copy_table_name_button_{db_label}"):
+                        # ボタンが押されたら、コピー用の物理名をセッションに保存 (または直接表示)
+                        # ここでは押されたことのフラグを立てる代わりに、直接表示する
+                        # (実際には st.code を使って表示するが、 Streamlit の制約でボタンコールバック内で即時表示更新が難しい場合があるため、
+                        #  状態管理やst.rerun()を適切に使うか、以下のようにメッセージとst.codeで案内する)
+                        st.session_state[f"show_copy_name_{db_label}"] = selected_physical_table_name
+
+                with copy_col2:
+                    # ボタンが押された場合に物理名を表示 (実際にはこの制御はもう少し工夫が必要かも)
+                    # ボタンクリックで表示状態をトグルする例
+                    if f"show_copy_name_{db_label}" in st.session_state and st.session_state[f"show_copy_name_{db_label}"] == selected_physical_table_name:
+                        # st.info("以下の物理名をコピーしてください:") # 案内メッセージはボタンの文言で兼ねる
+                        st.code(selected_physical_table_name, language=None) # language=Noneでプレーンテキストとして表示
+                        # 表示後はフラグをリセットするか、ユーザーが閉じるまで表示し続けるか設計による
+                        # ここでは一度表示したら残す（ボタン再押下で同じものが表示される）
+
+                st.markdown("---") # 区切り線
+
                 try:
                     # 選択されたテーブルのカラム情報を取得
-                    columns = get_table_columns(engine, st.session_state.get(selected_table_key), st.session_state.get(schema_name_key))
+                    columns = get_table_columns(engine, selected_physical_table_name, st.session_state.get(schema_name_key))
                     st.session_state[columns_key] = columns # カラム情報 (list[dict]) をセッション状態に保存
 
                     if columns:
-                        st.write(f"テーブル '{st.session_state.get(selected_table_key)}' のカラム:")
+                        st.write(f"テーブル '{selected_physical_table_name}' のカラム:")
                         # DataFrameに変換し、表示する列を指定・整形
                         df_columns = pd.DataFrame(columns)
                         # 表示用に'comment'がNoneの場合は空文字に置換
